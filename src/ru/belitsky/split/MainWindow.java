@@ -2,7 +2,9 @@ package ru.belitsky.split;
 
 import java.util.ResourceBundle;
 
+import javax.swing.BoxLayout;
 import javax.swing.JFrame;
+import javax.swing.JTextField;
 
 public class MainWindow extends JFrame {
 
@@ -14,6 +16,11 @@ public class MainWindow extends JFrame {
 		localization = ResourceBundle.getBundle("ru.belitsky.split.resources.SplitLocalization");
 
 		setTitle(localization.getString("title"));
+		getContentPane().setLayout(new BoxLayout(getContentPane(), BoxLayout.PAGE_AXIS));
+
+		add(new JTextField(20));
+
+		pack();
 	}
 
 	public void setSplitedFile(String file) {
