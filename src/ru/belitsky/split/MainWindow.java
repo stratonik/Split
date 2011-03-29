@@ -10,6 +10,7 @@ import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.text.NumberFormat;
 import java.util.ResourceBundle;
+import java.util.concurrent.CancellationException;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -63,6 +64,10 @@ public class MainWindow extends JFrame {
 
 	private JSpinner partNumber;
 
+	private SplitWorker worker;
+
+	private boolean isRunning = false;
+
 	public MainWindow() {
 		localization = ResourceBundle.getBundle("ru.belitsky.split.resources.SplitLocalization");
 
@@ -86,7 +91,14 @@ public class MainWindow extends JFrame {
 		south.add(createButtons());
 		getContentPane().add(south, BorderLayout.SOUTH);
 
+		refreshInfo();
 		pack();
+	}
+
+	private long calcPartSize() {
+		int size = (Integer) partSize.getValue();
+		int unit = partSizeUnit.getSelectedIndex();
+		return (long) (size * Math.pow(1024, unit));
 	}
 
 	private JPanel createButtons() {
@@ -94,7 +106,11 @@ public class MainWindow extends JFrame {
 		runButton.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				split();
+				if (!isRunning) {
+					split();
+				} else {
+					worker.cancel(false);
+				}
 			}
 		});
 
@@ -102,6 +118,9 @@ public class MainWindow extends JFrame {
 		exitButton.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
+				if (isRunning) {
+					worker.cancel(false);
+				}
 				MainWindow.this.dispose();
 			}
 		});
@@ -134,7 +153,7 @@ public class MainWindow extends JFrame {
 			}
 		});
 
-		inputFileInfo = new JLabel(localization.getString("inputFile.info") + localization.getString("inputFile.info.unknown"));
+		inputFileInfo = new JLabel();
 
 		JPanel inputFileBrowsePanel = new JPanel();
 		inputFileBrowsePanel.setLayout(new BoxLayout(inputFileBrowsePanel, BoxLayout.LINE_AXIS));
@@ -173,7 +192,7 @@ public class MainWindow extends JFrame {
 			}
 		});
 
-		outputFolderInfo = new JLabel(localization.getString("outputFolder.info") + localization.getString("outputFolder.info.unknown"));
+		outputFolderInfo = new JLabel();
 
 		JPanel outputFolderBrowsePanel = new JPanel();
 		outputFolderBrowsePanel.setLayout(new BoxLayout(outputFolderBrowsePanel, BoxLayout.LINE_AXIS));
@@ -206,6 +225,23 @@ public class MainWindow extends JFrame {
 		partNumber = new JSpinner(partNumberModel);
 		fixHeight(partNumber);
 
+		JButton recalc = new JButton(localization.getString("button.calc"));
+		recalc.addActionListener(new ActionListener() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				if ((inputFile != null) && inputFile.exists()) {
+					long fSize = inputFile.length();
+					long pSize = calcPartSize();
+					long number = fSize / pSize;
+					if (fSize % pSize != 0) {
+						number++;
+					}
+					number -= (Integer) fromPart.getValue() - 1;
+					partNumber.setValue(Math.max((int) number, 1));
+				}
+			}
+		});
+
 		JPanel partCountPanel = new JPanel();
 		partCountPanel.setBorder(BorderFactory.createTitledBorder(localization.getString("partCount.title")));
 		partCountPanel.setLayout(new BoxLayout(partCountPanel, BoxLayout.LINE_AXIS));
@@ -222,6 +258,7 @@ public class MainWindow extends JFrame {
 		partNumberPanel.setLayout(new BoxLayout(partNumberPanel, BoxLayout.LINE_AXIS));
 		partNumberPanel.add(new JLabel(localization.getString("partCount.number")));
 		partNumberPanel.add(partNumber);
+		partNumberPanel.add(recalc);
 
 		partCountPanel.add(fromPartPanel);
 		partCountPanel.add(partNumberPanel);
@@ -275,12 +312,25 @@ public class MainWindow extends JFrame {
 		comp.setMaximumSize(new Dimension(comp.getMaximumSize().width, height));
 	}
 
+	private void refreshInfo() {
+		if ((inputFile != null) && inputFile.exists()) {
+			inputFileInfo.setText(localization.getString("inputFile.info") + sizeToString(inputFile.length()));
+		} else {
+			inputFileInfo.setText(localization.getString("inputFile.info") + localization.getString("inputFile.info.unknown"));
+		}
+		if ((outputFolder != null) && outputFolder.exists()) {
+			outputFolderInfo.setText(localization.getString("outputFolder.info") + sizeToString(outputFolder.getFreeSpace()));
+		} else {
+			outputFolderInfo.setText(localization.getString("outputFolder.info") + localization.getString("outputFolder.info.unknown"));
+		}
+	}
+
 	public void setOutputFolder(File folder) {
 		if (folder.exists()) {
 			outputFolder = folder;
 			outputFolderChooser.setSelectedFile(outputFolder);
 			outputFolderName.setText(outputFolder.getName());
-			outputFolderInfo.setText(localization.getString("outputFolder.info") + sizeToString(outputFolder.getFreeSpace()));
+			refreshInfo();
 		}
 	}
 
@@ -293,7 +343,7 @@ public class MainWindow extends JFrame {
 			inputFile = file;
 			inputFileChooser.setSelectedFile(inputFile);
 			inputFileName.setText(inputFile.getName());
-			inputFileInfo.setText(localization.getString("inputFile.info") + sizeToString(inputFile.length()));
+			refreshInfo();
 		}
 	}
 
@@ -302,7 +352,15 @@ public class MainWindow extends JFrame {
 	}
 
 	private void showError(String errorKey) {
-		JOptionPane.showMessageDialog(this, localization.getString(errorKey), localization.getString("error.title"), JOptionPane.ERROR_MESSAGE);
+		showErrorDialog(localization.getString(errorKey));
+	}
+
+	private void showError(String errorKey, String message) {
+		showErrorDialog(localization.getString(errorKey) + message);
+	}
+
+	private void showErrorDialog(String message) {
+		JOptionPane.showMessageDialog(this, message, localization.getString("error.title"), JOptionPane.ERROR_MESSAGE);
 	}
 
 	private String sizeToString(long size) {
@@ -337,7 +395,7 @@ public class MainWindow extends JFrame {
 		}
 
 		Task task = new Task(inputFile, outputFolder);
-		task.setPartSize((Integer) partSize.getValue(), partSizeUnit.getSelectedIndex());
+		task.setPartSize(calcPartSize());
 		task.setPartFrom((Integer) fromPart.getValue());
 		task.setPartNumber((Integer) partNumber.getValue());
 
@@ -351,7 +409,24 @@ public class MainWindow extends JFrame {
 		}
 
 		progressBar.setValue(0);
-		SplitWorker worker = new SplitWorker(task);
+		worker = new SplitWorker(task) {
+			@Override
+			protected void done() {
+				try {
+					fromPart.setValue(get());
+				} catch (CancellationException e) {
+					progressBar.setValue(0);
+					fromPart.setValue((int) getCurrentPart());
+				} catch (Exception e) {
+					showError("error.task.exception", e.getLocalizedMessage());
+					progressBar.setValue(0);
+					fromPart.setValue((int) getCurrentPart());
+				}
+				refreshInfo();
+				isRunning = false;
+				runButton.setText(localization.getString("button.run"));
+			}
+		};
 		worker.addPropertyChangeListener(new PropertyChangeListener() {
 			public void propertyChange(PropertyChangeEvent evt) {
 				if ("progress".equals(evt.getPropertyName())) {
@@ -359,7 +434,11 @@ public class MainWindow extends JFrame {
 				}
 			}
 		});
+
 		worker.execute();
+
+		isRunning = true;
+		runButton.setText(localization.getString("button.cancel"));
 	}
 
 }

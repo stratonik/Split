@@ -47,6 +47,10 @@ public class Task {
 		return partSize;
 	}
 
+	public long getTotalSize() {
+		return getLastByteOffset() - getFirstByteOffset();
+	}
+
 	public void setPartFrom(long partFrom) {
 		if (partFrom > 0) {
 			this.partFrom = partFrom;
@@ -57,10 +61,6 @@ public class Task {
 		if (partNumber > 0) {
 			this.partNumber = partNumber;
 		}
-	}
-
-	public void setPartSize(int partSize, int unit) {
-		setPartSize((long) (partSize * Math.pow(1024, unit)));
 	}
 
 	public void setPartSize(long partSize) {
