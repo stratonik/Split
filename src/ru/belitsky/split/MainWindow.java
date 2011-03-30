@@ -5,6 +5,8 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.File;
@@ -27,6 +29,9 @@ import javax.swing.JProgressBar;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
+
+import ru.belitsky.split.prefs.IPreferences;
+import ru.belitsky.split.prefs.PreferencesFactory;
 
 public class MainWindow extends JFrame {
 
@@ -93,6 +98,52 @@ public class MainWindow extends JFrame {
 
 		refreshInfo();
 		pack();
+
+		setLocationRelativeTo(null);
+		addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosing(WindowEvent e) {
+				savePreferences(PreferencesFactory.getPreferences());
+			}
+
+			@Override
+			public void windowClosed(WindowEvent e) {
+				savePreferences(PreferencesFactory.getPreferences());
+			}
+		});
+	}
+
+	public void applyPreferences(IPreferences preferences) {
+		if (preferences.getInputFolder() != null) {
+			inputFileChooser.setCurrentDirectory(new File(preferences.getInputFolder()));
+		}
+		if (preferences.getOutputFolder() != null) {
+			setOutputFolder(preferences.getOutputFolder());
+		}
+
+		int partSizeValue = preferences.getPartSize();
+		if (partSizeValue > 0) {
+			partSize.setValue(partSizeValue);
+		}
+		int partSizeUnitValue = preferences.getPortSizeUnit();
+		if (partSizeUnitValue >= 0 && partSizeUnitValue < partSizeUnit.getItemCount()) {
+			partSizeUnit.setSelectedIndex(partSizeUnitValue);
+		}
+	}
+
+	private void calcPartNumber() {
+		if ((inputFile != null) && inputFile.exists()) {
+			long fSize = inputFile.length();
+			long pSize = calcPartSize();
+			long number = fSize / pSize;
+			if (fSize % pSize != 0) {
+				number++;
+			}
+			number -= (Integer) fromPart.getValue() - 1;
+			partNumber.setValue(Math.max((int) number, 1));
+		} else {
+			partNumber.setValue(1);
+		}
 	}
 
 	private long calcPartSize() {
@@ -229,16 +280,7 @@ public class MainWindow extends JFrame {
 		recalc.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				if ((inputFile != null) && inputFile.exists()) {
-					long fSize = inputFile.length();
-					long pSize = calcPartSize();
-					long number = fSize / pSize;
-					if (fSize % pSize != 0) {
-						number++;
-					}
-					number -= (Integer) fromPart.getValue() - 1;
-					partNumber.setValue(Math.max((int) number, 1));
-				}
+				calcPartNumber();
 			}
 		});
 
@@ -269,7 +311,7 @@ public class MainWindow extends JFrame {
 	private JPanel createPartSizePanel() {
 		SpinnerNumberModel model = new SpinnerNumberModel();
 		model.setMinimum(new Integer(1));
-		model.setValue(new Integer(4));
+		model.setValue(new Integer(4000));
 		partSize = new JSpinner(model);
 		fixHeight(partSize);
 
@@ -278,7 +320,7 @@ public class MainWindow extends JFrame {
 			units[i] = localization.getString("size.long." + DIMENSIONS[i]);
 		}
 		partSizeUnit = new JComboBox(units);
-		partSizeUnit.setSelectedIndex(3);
+		partSizeUnit.setSelectedIndex(2);
 		fixHeight(partSizeUnit, partSize.getMaximumSize().height);
 
 		JPanel partSizePanel = new JPanel();
@@ -325,6 +367,18 @@ public class MainWindow extends JFrame {
 		}
 	}
 
+	private void resetPartCount() {
+		fromPart.setValue(1);
+		calcPartNumber();
+	}
+
+	public void savePreferences(IPreferences preferences) {
+		preferences.setInputFolder((inputFile != null) ? inputFile.getParent() : null);
+		preferences.setOutputFolder((outputFolder != null) ? outputFolder.getPath() : null);
+		preferences.setPartSize((Integer) partSize.getValue());
+		preferences.setPartSizeUnit(partSizeUnit.getSelectedIndex());
+	}
+
 	public void setOutputFolder(File folder) {
 		if (folder.exists()) {
 			outputFolder = folder;
@@ -344,6 +398,7 @@ public class MainWindow extends JFrame {
 			inputFileChooser.setSelectedFile(inputFile);
 			inputFileName.setText(inputFile.getName());
 			refreshInfo();
+			resetPartCount();
 		}
 	}
 
@@ -413,14 +468,17 @@ public class MainWindow extends JFrame {
 			@Override
 			protected void done() {
 				try {
-					fromPart.setValue(get());
-				} catch (CancellationException e) {
-					progressBar.setValue(0);
-					fromPart.setValue((int) getCurrentPart());
+					get();
 				} catch (Exception e) {
-					showError("error.task.exception", e.getLocalizedMessage());
+					if (!(e instanceof CancellationException)) {
+						showError("error.task.exception", e.getLocalizedMessage());
+					}
 					progressBar.setValue(0);
+
+					int oldFromPart = (Integer) fromPart.getValue();
+					int oldPartNumber = (Integer) partNumber.getValue();
 					fromPart.setValue((int) getCurrentPart());
+					partNumber.setValue(Math.max(1, oldPartNumber - ((int) getCurrentPart() - oldFromPart)));
 				}
 				refreshInfo();
 				isRunning = false;
